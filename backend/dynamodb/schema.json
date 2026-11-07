@@ -1,0 +1,113 @@
+{
+  "Tables": [
+    {
+      "TableName": "CampusFlow_Services",
+      "KeySchema": [
+        { "AttributeName": "serviceId", "KeyType": "HASH" }
+      ],
+      "AttributeDefinitions": [
+        { "AttributeName": "serviceId", "AttributeType": "S" },
+        { "AttributeName": "category", "AttributeType": "S" }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "CategoryIndex",
+          "KeySchema": [
+            { "AttributeName": "category", "KeyType": "HASH" }
+          ],
+          "Projection": { "ProjectionType": "ALL" }
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST"
+    },
+    {
+      "TableName": "CampusFlow_Queues",
+      "KeySchema": [
+        { "AttributeName": "ticketId", "KeyType": "HASH" }
+      ],
+      "AttributeDefinitions": [
+        { "AttributeName": "ticketId", "AttributeType": "S" },
+        { "AttributeName": "serviceId", "AttributeType": "S" },
+        { "AttributeName": "status", "AttributeType": "S" },
+        { "AttributeName": "createdAt", "AttributeType": "S" }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "ServiceStatusIndex",
+          "KeySchema": [
+            { "AttributeName": "serviceId", "KeyType": "HASH" },
+            { "AttributeName": "status", "KeyType": "RANGE" }
+          ],
+          "Projection": { "ProjectionType": "ALL" }
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST"
+    },
+    {
+      "TableName": "CampusFlow_EmergencyRequests",
+      "KeySchema": [
+        { "AttributeName": "emergencyId", "KeyType": "HASH" }
+      ],
+      "AttributeDefinitions": [
+        { "AttributeName": "emergencyId", "AttributeType": "S" },
+        { "AttributeName": "serviceId_date", "AttributeType": "S" },
+        { "AttributeName": "status", "AttributeType": "S" }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "ServiceDateIndex",
+          "KeySchema": [
+            { "AttributeName": "serviceId_date", "KeyType": "HASH" },
+            { "AttributeName": "status", "KeyType": "RANGE" }
+          ],
+          "Projection": { "ProjectionType": "ALL" }
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST"
+    },
+    {
+      "TableName": "CampusFlow_Appointments",
+      "KeySchema": [
+        { "AttributeName": "appointmentId", "KeyType": "HASH" }
+      ],
+      "AttributeDefinitions": [
+        { "AttributeName": "appointmentId", "AttributeType": "S" },
+        { "AttributeName": "serviceId", "AttributeType": "S" },
+        { "AttributeName": "date", "AttributeType": "S" }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "ServiceDateIndex",
+          "KeySchema": [
+            { "AttributeName": "serviceId", "KeyType": "HASH" },
+            { "AttributeName": "date", "KeyType": "RANGE" }
+          ],
+          "Projection": { "ProjectionType": "ALL" }
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST"
+    },
+    {
+      "TableName": "CampusFlow_DigitalRequests",
+      "KeySchema": [
+        { "AttributeName": "requestId", "KeyType": "HASH" }
+      ],
+      "AttributeDefinitions": [
+        { "AttributeName": "requestId", "AttributeType": "S" },
+        { "AttributeName": "studentId", "AttributeType": "S" }
+      ],
+      "BillingMode": "PAY_PER_REQUEST"
+    },
+    {
+      "TableName": "CampusFlow_Staff",
+      "KeySchema": [
+        { "AttributeName": "staffId", "KeyType": "HASH" }
+      ],
+      "AttributeDefinitions": [
+        { "AttributeName": "staffId", "AttributeType": "S" },
+        { "AttributeName": "serviceId", "AttributeType": "S" }
+      ],
+      "BillingMode": "PAY_PER_REQUEST"
+    }
+  ]
+}
