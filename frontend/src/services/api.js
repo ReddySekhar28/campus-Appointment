@@ -1,5 +1,4 @@
-import { supabase } from '../lib/supabase';
-import { 
+import { supabase } from '../lib/supabase';import { 
   INITIAL_SERVICES, 
   INITIAL_STAFF, 
   INITIAL_QUEUES, 
@@ -635,33 +634,211 @@ const response = await fetch(`${API_BASE_URL}/queue/join`, {
 
   // 8. Staff Operations
   async getStaffQueues(serviceId) {
-    const normalQueue = queues.filter(q => q.serviceId === serviceId && !q.isEmergency && q.status !== 'COMPLETED' && q.status !== 'CANCELLED');
-    const emergencyQueue = queues.filter(q => q.serviceId === serviceId && q.isEmergency && q.status !== 'COMPLETED' && q.status !== 'CANCELLED');
-    const pendingEmergencies = emergencyRequests.filter(e => e.serviceId === serviceId && e.status !== 'COMPLETED' && e.status !== 'REJECTED');
-    const deptProblems = problems.filter(p => p.serviceId === serviceId && p.status !== 'RESOLVED');
-    
-    return {
-      normalQueue,
-      emergencyQueue,
-      pendingEmergencies,
-      deptProblems
-    };
-  },
+  const service = services.find(
+    s => s.serviceId === serviceId
+  );
 
+  const serviceName = service?.name || serviceId;
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+
+  if (sessionError || !session?.access_token) {
+    throw new Error(
+      "Please sign in with your staff account."
+    );
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/queue/tickets/${encodeURIComponent(serviceName)}`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${session.access_token}`
+      }
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Unable to load queue tickets.");
+  }
+
+  const rows = await response.json();
+
+  const databaseTickets = (Array.isArray(rows) ? rows : rows.tickets || [])
+    .map(row => ({
+      id: row.id,
+      ticketId: row.ticket_id,
+      serviceId,
+      serviceName: row.service,
+      studentName: row.student_name || "Student",
+      studentId: row.user_id,
+      status: row.status,
+      queueNumber: row.queue_number,
+      peopleAhead: row.people_ahead,
+      estimatedWaitMinutes: row.estimated_wait_minutes,
+      isEmergency: Boolean(row.is_emergency)
+    }));
+      // Keep database tickets available to staff operations.
+  databaseTickets.forEach(dbTicket => {
+    const existingIndex = queues.findIndex(
+      q => q.ticketId === dbTicket.ticketId
+    );
+
+    if (existingIndex >= 0) {
+      Object.assign(queues[existingIndex], dbTicket);
+    } else {
+      queues.push(dbTicket);
+    }
+  });
+
+  const activeTickets = databaseTickets.filter(
+    ticket =>
+      ticket.status !== "COMPLETED" &&
+      ticket.status !== "CANCELLED"
+  );
+
+  const normalQueue = activeTickets.filter(
+    ticket => !ticket.isEmergency
+  );
+
+  const databaseEmergencyIds = new Set(
+    activeTickets
+      .filter(ticket => ticket.isEmergency)
+      .map(ticket => ticket.ticketId)
+  );
+
+  const localEmergencyQueue = queues.filter(
+    ticket =>
+      ticket.serviceId === serviceId &&
+      ticket.isEmergency &&
+      ticket.status !== "COMPLETED" &&
+      ticket.status !== "CANCELLED" &&
+      !databaseEmergencyIds.has(ticket.ticketId)
+  );
+
+  const emergencyQueue = [
+    ...activeTickets.filter(ticket => ticket.isEmergency),
+    ...localEmergencyQueue
+  ];
+
+  const pendingEmergencies = emergencyRequests.filter(
+    e =>
+      e.serviceId === serviceId &&
+      e.status !== "COMPLETED" &&
+      e.status !== "REJECTED"
+  );
+
+  const deptProblems = problems.filter(
+    p =>
+      p.serviceId === serviceId &&
+      p.status !== "RESOLVED"
+  );
+
+  return {
+    normalQueue,
+    emergencyQueue,
+    pendingEmergencies,
+    deptProblems
+  };
+},
+  // Call the next queue ticket and save status in PostgreSQL.
   async callNextTicket(ticketId) {
     const ticket = queues.find(q => q.ticketId === ticketId);
-    if (ticket) {
-      ticket.status = 'IN_PROGRESS';
-      logActivity(`Desk called ticket [${ticketId}] to counter desk!`, "CALL");
-      saveState();
+
+    if (!ticket) {
+      throw new Error("Queue ticket not found.");
     }
+
+    // Emergency tickets still use the existing local workflow.
+    if (ticket.isEmergency) {
+      ticket.status = "IN_PROGRESS";
+      logActivity(`Desk called emergency ticket [${ticketId}]`, "CALL");
+      saveState();
+      return ticket;
+    }
+
+    const {
+      data: { session },
+      error: sessionError
+    } = await supabase.auth.getSession();
+
+    if (sessionError || !session?.access_token) {
+      throw new Error("Please sign in with your staff account.");
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/queue/tickets/${encodeURIComponent(ticketId)}/status`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ status: "IN_PROGRESS" })
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Unable to call this queue ticket.");
+    }
+
+    const data = await response.json();
+
+    Object.assign(ticket, {
+      status: data.ticket.status
+    });
+
+    logActivity(`Desk called ticket [${ticketId}] to counter desk!`, "CALL");
+    saveState();
+
     return ticket;
   },
 
   // Complete Ticket -> SIGNATURE COMPLETED -> Mark ticket COMPLETED, link emergency/problem, REDUCE WAIT TIME
   async completeTicket(ticketId, completionType = "SIGNATURE_COMPLETED") {
-    const ticket = queues.find(q => q.ticketId === ticketId);
-    if (!ticket) return null;
+    let ticket = queues.find(q => q.ticketId === ticketId);
+
+    if (!ticket) {
+      throw new Error("Queue ticket not found.");
+    }
+
+    // Save normal queue completion in the shared database.
+    if (!ticket.isEmergency) {
+      const {
+        data: { session },
+        error: sessionError
+      } = await supabase.auth.getSession();
+
+      if (sessionError || !session?.access_token) {
+        throw new Error("Please sign in with your staff account.");
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/queue/tickets/${encodeURIComponent(ticketId)}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ status: "COMPLETED" })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Unable to complete this queue ticket.");
+      }
+
+      const data = await response.json();
+      Object.assign(ticket, {
+        status: data.ticket.status,
+        studentName: data.ticket.student_name || ticket.studentName
+      });
+    }
 
     ticket.status = 'COMPLETED';
     ticket.completedAt = new Date().toISOString();
