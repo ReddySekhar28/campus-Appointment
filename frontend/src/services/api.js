@@ -1,3 +1,4 @@
+import { supabase } from '../lib/supabase';
 import { 
   INITIAL_SERVICES, 
   INITIAL_STAFF, 
